@@ -22,11 +22,44 @@ function initializePortfolioData() {
         loadDefaultData();
     }
     
-    // Check for admin mode in URL
+    // Setup data sync across tabs
+    setupDataSync();
+    
+    // Only enable edit mode if admin parameter is present
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('admin') === 'true') {
         enableEditMode();
+        // Add admin indicator
+        const adminIndicator = document.createElement('div');
+        adminIndicator.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: var(--warning);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            z-index: 10000;
+        `;
+        adminIndicator.textContent = 'Admin Mode';
+        document.body.appendChild(adminIndicator);
+    } else {
+        disableEditMode(); // Ensure edit mode is disabled for normal users
     }
+}
+
+// Setup data sync across tabs
+function setupDataSync() {
+    window.addEventListener('storage', function(e) {
+        if (e.key === 'portfolioData' && e.newValue) {
+            const shouldUpdate = confirm('Portfolio data has been updated from another tab. Do you want to reload?');
+            if (shouldUpdate) {
+                portfolioData = JSON.parse(e.newValue);
+                loadPortfolioData();
+            }
+        }
+    });
 }
 
 // Load default data
@@ -37,7 +70,7 @@ function loadDefaultData() {
             description: `<p>I am a highly adaptable, disciplined, and proactive individual with a keen interest in both organizational management and fundamental programming concepts. My commitment to student life is demonstrated by my active roles in several key committees during my second year at ITS.</p>
                          <p>Simultaneously, I possess a strong foundation and practical interest in programming, having executed projects that utilize Python for data processing, Arduino C++ for firmware development, and C++ for implementing core algorithms.</p>`,
             phone: '+6281250058588',
-            email: 'arya.dutaptn@gmail.com',
+            email: 'aryadutaptn@gmail.com',
             location: 'Surabaya, Indonesia',
             linkedin: 'linkedin.com/in/arya-muhammad-duta-syafinda'
         },
@@ -273,6 +306,9 @@ function enableEditMode() {
     document.querySelectorAll('.admin-only').forEach(el => {
         el.style.display = 'block';
     });
+    document.querySelectorAll('.btn-edit').forEach(btn => {
+        btn.style.display = 'inline-block';
+    });
     loadProjects(); // Reload projects to show delete buttons
 }
 
@@ -282,6 +318,9 @@ function disableEditMode() {
     document.getElementById('admin').style.display = 'none';
     document.querySelectorAll('.admin-only').forEach(el => {
         el.style.display = 'none';
+    });
+    document.querySelectorAll('.btn-edit').forEach(btn => {
+        btn.style.display = 'none';
     });
     loadProjects(); // Reload projects to hide delete buttons
 }
@@ -389,6 +428,10 @@ function saveSectionChanges(sectionId, element) {
 
 // Project management
 function showAddProjectModal() {
+    if (!isEditMode) {
+        showNotification('Admin access required to add projects', 'warning');
+        return;
+    }
     document.getElementById('addProjectModal').style.display = 'block';
 }
 
@@ -402,12 +445,18 @@ function deleteProject(projectId) {
         portfolioData.projects = portfolioData.projects.filter(project => project.id !== projectId);
         savePortfolioData();
         loadProjects();
+        showNotification('Project deleted successfully!', 'success');
     }
 }
 
 // Add new project
 document.getElementById('project-form').addEventListener('submit', function(e) {
     e.preventDefault();
+    
+    if (!isEditMode) {
+        showNotification('Admin access required to add projects', 'warning');
+        return;
+    }
     
     const title = document.getElementById('project-title').value;
     const description = document.getElementById('project-description').value;
@@ -428,11 +477,8 @@ document.getElementById('project-form').addEventListener('submit', function(e) {
         });
     }
     
-    // Handle image
-    let imageURL = 'https://via.placeholder.com/350x200/2d3748/ffffff?text=New+Project';
-    if (imageFile) {
-        imageURL = URL.createObjectURL(imageFile);
-    }
+    // Handle image - Use placeholder for now (base64 conversion can cause issues)
+    let imageURL = 'https://via.placeholder.com/350x200/2d3748/ffffff?text=' + encodeURIComponent(title);
     
     // Add new project
     const newProject = {
@@ -445,17 +491,39 @@ document.getElementById('project-form').addEventListener('submit', function(e) {
         links
     };
     
-    portfolioData.projects.push(newProject);
-    savePortfolioData();
-    loadProjects();
-    closeAddProjectModal();
-    
-    // Show success message
-    showNotification('Project added successfully!', 'success');
+    // If image file is selected, try to convert to base64 but fallback to placeholder
+    if (imageFile) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            newProject.image = event.target.result;
+            portfolioData.projects.push(newProject);
+            savePortfolioData();
+            loadProjects();
+            closeAddProjectModal();
+            showNotification('Project added successfully!', 'success');
+        };
+        reader.onerror = function() {
+            // If conversion fails, use placeholder
+            portfolioData.projects.push(newProject);
+            savePortfolioData();
+            loadProjects();
+            closeAddProjectModal();
+            showNotification('Project added (using placeholder image)!', 'warning');
+        };
+        reader.readAsDataURL(imageFile);
+    } else {
+        portfolioData.projects.push(newProject);
+        savePortfolioData();
+        loadProjects();
+        closeAddProjectModal();
+        showNotification('Project added successfully!', 'success');
+    }
 });
 
 // Profile image upload
 document.getElementById('image-upload').addEventListener('change', function(e) {
+    if (!isEditMode) return;
+    
     const file = e.target.files[0];
     if (file) {
         const reader = new FileReader();
@@ -465,11 +533,12 @@ document.getElementById('image-upload').addEventListener('change', function(e) {
             loadPortfolioData();
             showNotification('Profile image updated!', 'success');
         };
+        reader.onerror = function() {
+            showNotification('Failed to update profile image', 'warning');
+        };
         reader.readAsDataURL(file);
     }
 });
-
-// Contact info editing (simplified - would need more complex implementation for individual field editing)
 
 // Admin functions
 function exportData() {
@@ -492,7 +561,6 @@ function resetData() {
 }
 
 function addNewSection() {
-    // Implementation for adding new sections would go here
     showNotification('New section feature coming soon!', 'warning');
 }
 
@@ -511,7 +579,7 @@ function showNotification(message, type = 'info') {
         position: fixed;
         top: 20px;
         right: 20px;
-        background: ${type === 'success' ? '#48bb78' : type === 'warning' ? '#ed8936' : '#e53e3e'};
+        background: ${type === 'success' ? '#48bb78' : type === 'warning' ? '#ed8936' : type === 'info' ? '#4299e1' : '#e53e3e'};
         color: white;
         padding: 1rem 1.5rem;
         border-radius: 5px;
@@ -586,6 +654,22 @@ document.addEventListener('DOMContentLoaded', function() {
             align-items: center;
             justify-content: center;
         }
+        
+        .btn-edit {
+            display: none;
+        }
+        
+        .edit-mode .btn-edit {
+            display: inline-block;
+        }
     `;
     document.head.appendChild(style);
+});
+
+// Close modal when clicking outside
+window.addEventListener('click', function(event) {
+    const modal = document.getElementById('addProjectModal');
+    if (event.target === modal) {
+        closeAddProjectModal();
+    }
 });
